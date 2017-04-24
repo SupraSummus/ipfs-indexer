@@ -58,8 +58,20 @@ def process_object_content(
 
         session.merge(Availability(object_hash=hash, available=True))
 
-    except (requests.exceptions.Timeout, requests.HTTPError):
+    except requests.exceptions.Timeout:
+        print('{} cat timed out'.format(hash))
         session.merge(Availability(object_hash=hash, available=False))
+
+    except requests.HTTPError:
+        # cat failed - it may be directory
+        func(session, hash, None)
 
     finally:
         session.commit()
+
+def set_property_based_on_content(hash, property_name, func, **kwargs):
+    def f(session, hash, data):
+        value = func(hash, data)
+        print('{} {}: {}'.format(hash, property_name, value))
+        session.merge(Property(object_hash=hash, name=property_name, value=value))
+    process_object_content(hash, f, **kwargs)

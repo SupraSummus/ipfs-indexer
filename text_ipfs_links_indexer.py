@@ -13,6 +13,9 @@ PROPERTY_NAME = '{} {} {}'.format(BASE_PROPERTY_NAME, HEAD_SIZE, MAX_LINKS)
 LINK_TYPE = 'text'
 
 def index_text_ipfs_links(session, hash, data):
+    if data is None:
+        return None
+
     ms = re.findall('ipfs/([a-zA-Z0-9]+)', data.decode('ASCII', 'replace'))
     for match in ms[:MAX_LINKS]:
         session.merge(Object(hash=match))
@@ -22,7 +25,7 @@ def index_text_ipfs_links(session, hash, data):
 def loop(session=session, sleep_seconds=60, cat_api_url=settings.CAT_API_URL):
     while True:
         html_hashes = session.query(Property.object_hash)\
-            .filter(Property.name == file_tagger.PROPERTY_NAME)\
+            .filter(Property.name.ilike(file_tagger.BASE_PROPERTY_NAME + '%'))\
             .filter(Property.value.ilike('%text%'))
         base_query = session.query(Object)\
             .filter(Object.hash.in_(html_hashes))
