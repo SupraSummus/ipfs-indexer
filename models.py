@@ -4,6 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, relationship
 import datetime
 
+import settings
 
 Base = declarative_base()
 
@@ -71,7 +72,7 @@ class Link(Base):
 
 
 
-engine = create_engine('postgresql://ipfs_indexer@localhost/')
+engine = create_engine(settings.DB)
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 session = Session()
