@@ -4,7 +4,7 @@ from functools import lru_cache
 import requests
 import time
 
-from models import session, Object, Availability, Property, Link
+from models import session, Object, Availability, Property
 import settings
 
 
@@ -97,7 +97,6 @@ class ContentIndexerMixin():
         self.cat_timeout = cat_timeout
         super().__init__(*args, **kwargs)
 
-    @lru_cache(maxsize=4)
     def get_content(self, hash):
         try:
             r = requests.get(
@@ -135,47 +134,3 @@ class ContentIndexer(Indexer, ContentIndexerMixin):
     def get_property_value_for_object(self, hash):
         data = self.get_content(hash)
         return self.get_property_value_for_content(hash, data)
-
-
-class LinksIndexer(Indexer):
-    """Saves links when processing objects.
-
-    Subclasses must set class variables:
-     * max_links - link limit in single object (None for no limit)
-     * link_type
-    """
-
-    def get_links(self, hash):
-        raise NotImplementedError()
-
-    def get_property_value_for_object(self, hash):
-        return None # just to mark that it's been processed
-
-    def process_object(self, hash):
-        links = self.get_links(hash)
-        if self.max_links is not None:
-            links = links[:self.max_links]
-
-        for target_hash, name in links:
-            self.session.merge(Object(
-                hash=target_hash
-            ))
-            self.session.merge(Link(
-                parent_object_hash=hash,
-                child_object_hash=target_hash,
-                type=self.link_type,
-                name=name
-            ))
-        print('{} {} links: {}'.format(hash, self.link_type, len(links)))
-
-        super().process_object(hash)
-
-
-class ContentLinksIndexer(LinksIndexer, ContentIndexerMixin):
-
-    def get_links_from_content(self, hash, data):
-        raise NotImplementedError()
-
-    def get_links(self, hash):
-        data = self.get_content(hash)
-        return self.get_links_from_content(hash, data)

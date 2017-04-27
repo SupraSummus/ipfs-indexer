@@ -16,6 +16,7 @@ class Name(Base):
     hash = Column(String, primary_key=True)
 
     resolutions = relationship('Resolution')
+    references = relationship('NameReference')
 
     def __str__(self):
        return self.hash
@@ -30,6 +31,16 @@ class Resolution(Base):
     object_hash = Column(String, ForeignKey('object.hash')) # None if lookup failed
 
 
+class NameReference(Base):
+    """Reference from object to name."""
+    __tablename__ = 'name_reference'
+
+    object_hash = Column(String, ForeignKey('object.hash'), primary_key=True)
+    type = Column(String, primary_key=True) # reference type
+    name_hash = Column(String, ForeignKey('name.hash'), primary_key=True)
+    label = Column(String, primary_key=True) # link text
+
+
 class Object(Base):
     """IPFS object. Probably a dir or a file."""
     __tablename__ = 'object'
@@ -41,6 +52,7 @@ class Object(Base):
     children = relationship('Link', foreign_keys='Link.parent_object_hash')
     parents = relationship('Link', foreign_keys='Link.child_object_hash')
     resolutions = relationship('Resolution')
+    referenced_names = relationship('NameReference')
 
 
 class Property(Base):
