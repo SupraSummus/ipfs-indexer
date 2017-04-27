@@ -2,3 +2,4 @@ requests==2.13.0
 Flask==0.12.1
 Flask-Restless==0.17.0
 SQLAlchemy==1.1.9
+elasticsearch==5.3.0
