@@ -72,6 +72,7 @@ class Indexer:
                 try:
                     self.process_object(obj.hash)
                 except ObjectNotAvailable:
+                    self.session.merge(Availability(object_hash=obj.hash, available=False))
                     print('{} na'.format(obj.hash))
                 finally:
                     self.session.commit()
@@ -80,7 +81,7 @@ class Indexer:
                 time.sleep(self.sleep_seconds)
 
 
-class ContentIndexerMixin():
+class ContentIndexerMixin(Indexer):
     """Provides method for retriving object content.
 
     Subclasses must set class variables:
@@ -117,7 +118,6 @@ class ContentIndexerMixin():
             return data
 
         except requests.exceptions.Timeout:
-            self.session.merge(Availability(object_hash=hash, available=False))
             raise ObjectNotAvailable()
 
         except requests.HTTPError:
@@ -125,7 +125,7 @@ class ContentIndexerMixin():
             return None
 
 
-class ContentIndexer(Indexer, ContentIndexerMixin):
+class ContentIndexer(ContentIndexerMixin):
     """Sets property based on object content."""
 
     def get_property_value_for_content(self, hash, data):
