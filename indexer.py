@@ -4,8 +4,9 @@ from functools import lru_cache
 import requests
 import time
 
-from models import session, Object, Availability, Property
+from models import Object, Availability, Property
 import settings
+from db_connection import session
 
 
 class ObjectNotAvailable(Exception):

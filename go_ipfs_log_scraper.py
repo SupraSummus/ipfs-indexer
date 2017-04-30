@@ -2,7 +2,8 @@ import requests
 import json
 from functools import lru_cache
 
-from models import session, Name, Object
+from models import Name, Object
+from db_connection import session
 
 LOG_URL = 'http://localhost:5001/api/v0/log/tail'
 

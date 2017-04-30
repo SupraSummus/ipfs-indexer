@@ -1,7 +1,8 @@
 from flask import Flask
 from flask_restless import APIManager
 
-from models import session, Name, Object
+from models import Name, Object
+from db_connection import session
 
 app = Flask(__name__)
 

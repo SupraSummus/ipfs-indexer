@@ -1,10 +1,7 @@
 from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import relationship
 import datetime
-
-import settings
 
 Base = declarative_base()
 
@@ -81,10 +78,3 @@ class Link(Base):
     parent_object_hash = Column(String, ForeignKey('object.hash'), primary_key=True)
     child_object_hash = Column(String, ForeignKey('object.hash'), primary_key=True)
     name = Column(String, primary_key=True)
-
-
-
-engine = create_engine(settings.DB)
-Base.metadata.create_all(engine)
-Session = sessionmaker(bind=engine)
-session = Session()

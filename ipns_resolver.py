@@ -3,7 +3,8 @@ import requests
 import time
 from sqlalchemy import func
 
-from models import session, Name, Resolution, Object
+from models import Name, Resolution, Object
+from db_connection import session
 
 RESOLVE_URL = 'http://localhost:5001/api/v0/name/resolve'
 RESOLUTION_INTERVAL = datetime.timedelta(hours=12)

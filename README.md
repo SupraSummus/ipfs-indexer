@@ -11,6 +11,7 @@ Preparations
  * Set up go_ipfs node. We need it's API to look into data.
  * Set up virtualenv and install stuff from `requirements.txt`.
  * Edit `settings.py` to match your setup. (Mainly `DB` variable.)
+ * Initialize database by doing `alembic upgrade head`.
 
 Utilities
 
