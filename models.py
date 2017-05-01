@@ -1,6 +1,6 @@
 from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, joinedload
 from sqlalchemy_searchable import make_searchable, parse_search_query
 from sqlalchemy_utils.types import TSVectorType
 import datetime
@@ -64,7 +64,8 @@ class Object(Base):
             .join(Object.parents)\
             .filter(combined_search_vector.match(
                 parse_search_query(query)
-            ))
+            ))\
+            .group_by(Object)
 
 
 class Property(Base):
