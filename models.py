@@ -1,9 +1,12 @@
 from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+from sqlalchemy_searchable import make_searchable, parse_search_query
+from sqlalchemy_utils.types import TSVectorType
 import datetime
 
 Base = declarative_base()
+make_searchable(options={'regconfig': 'pg_catalog.simple'})
 
 
 class Name(Base):
@@ -37,6 +40,8 @@ class NameReference(Base):
     name_hash = Column(String, ForeignKey('name.hash'), primary_key=True)
     label = Column(String, primary_key=True) # link text
 
+    search_vector = Column(TSVectorType('label'))
+
 
 class Object(Base):
     """IPFS object. Probably a dir or a file."""
@@ -51,6 +56,16 @@ class Object(Base):
     resolutions = relationship('Resolution')
     referenced_names = relationship('NameReference')
 
+    @classmethod
+    def full_text_search(cls, session, query):
+        combined_search_vector = Property.search_vector | Link.search_vector
+        return session.query(Object)\
+            .join(Object.properties)\
+            .join(Object.parents)\
+            .filter(combined_search_vector.match(
+                parse_search_query(query)
+            ))
+
 
 class Property(Base):
     """Property of an object."""
@@ -59,6 +74,8 @@ class Property(Base):
     object_hash = Column(String, ForeignKey('object.hash'), primary_key=True)
     name = Column(String, primary_key=True)
     value = Column(String) # can be None
+
+    search_vector = Column(TSVectorType('value'))
 
 
 class Availability(Base):
@@ -78,3 +95,5 @@ class Link(Base):
     parent_object_hash = Column(String, ForeignKey('object.hash'), primary_key=True)
     child_object_hash = Column(String, ForeignKey('object.hash'), primary_key=True)
     name = Column(String, primary_key=True)
+
+    search_vector = Column(TSVectorType('name'))
