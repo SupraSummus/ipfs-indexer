@@ -16,8 +16,8 @@ class FileTypeIndexer(ContentIndexer):
         with tempfile.NamedTemporaryFile() as fp:
             fp.write(data)
             fp.flush()
-            result = subprocess.run(['file', '-b', fp.name], stdout=subprocess.PIPE, encoding='UTF-8')
-            return result.stdout.strip()
+            result = subprocess.check_output(['file', '-b', fp.name])
+            return result.decode('UTF-8').strip()
 
 if __name__ == '__main__':
     FileTypeIndexer().loop()
