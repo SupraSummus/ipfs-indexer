@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request
 from flask_restless import APIManager
+from math import ceil
 
 from models import Name, Object
 from db_connection import session
@@ -13,10 +14,15 @@ api_manager.create_api(Object, methods=['GET'])
 
 @app.route('/api/object_search', methods=['GET'])
 def object_search():
-    query = request.args.get('q')
+    query = request.args.get('q', '')
+    page = max(0, int(request.args.get('page', '0')))
+    page_size = 20
     objs = Object.full_text_search(session, query)
+    num_objs = objs.count()
     return jsonify({
-        'num_results': objs.count(),
+        'page': page,
+        'num_results': num_objs,
+        'num_pages': ceil(num_objs/page_size),
         'objects': [
             {
                 'hash': o.hash,
@@ -26,7 +32,7 @@ def object_search():
                     'parent': r.parent_object_hash,
                     'label': r.name,
                 } for r in o.parents],
-            } for o in objs.limit(20)
+            } for o in objs.offset(page_size * page).limit(page_size)
         ],
     })
 
