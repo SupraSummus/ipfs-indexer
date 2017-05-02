@@ -4,6 +4,7 @@ from math import ceil
 
 from models import Name, Object
 from db_connection import session
+import settings
 
 app = Flask(__name__)
 
@@ -37,4 +38,4 @@ def object_search():
     })
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=settings.FLASK_DEBUG)

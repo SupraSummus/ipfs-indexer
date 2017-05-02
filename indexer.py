@@ -91,7 +91,7 @@ class ContentIndexerMixin(Indexer):
 
     def __init__(self,
         *args,
-        cat_api_url=settings.CAT_API_URL,
+        cat_api_url=settings.IPFS_CAT_API_URL,
         cat_timeout=10,
         **kwargs
     ):

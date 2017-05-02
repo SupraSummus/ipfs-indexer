@@ -3,6 +3,7 @@ import requests
 from models import Availability
 from indexer import ObjectNotAvailable
 from links_indexer import LinksIndexer, ObjectLinksIndexerMixin
+import settings
 
 
 class ObjectLinksIndexer(ObjectLinksIndexerMixin):
@@ -14,7 +15,7 @@ class ObjectLinksIndexer(ObjectLinksIndexerMixin):
 
     def __init__(self,
         *args,
-        object_links_api_url='http://localhost:5001/api/v0/object/links',
+        object_links_api_url=settings.IPFS_LINKS_API_URL,
         timeout=10,
         **kwargs
     ):
