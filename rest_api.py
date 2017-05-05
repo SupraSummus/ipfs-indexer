@@ -7,6 +7,7 @@ from db_connection import session
 import settings
 
 app = Flask(__name__)
+application = app # WSGI
 
 api_manager = APIManager(app, session=session)
 
