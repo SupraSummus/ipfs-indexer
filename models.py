@@ -98,3 +98,6 @@ class Link(Base):
     name = Column(String, primary_key=True)
 
     search_vector = Column(TSVectorType('name'))
+
+
+from monitoring.models import *
