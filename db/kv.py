@@ -3,7 +3,7 @@ import urllib.parse
 
 
 class KV:
-    """Map-like object that holds mutable mapping bytestring -> bytesting."""
+    """Map-like object that holds mutable mapping bytestring -> bytestring. Unset values are b''."""
     INITIAL_NODE_HASH = 'QmdfTbBqBPQ7VNxZEYEj14VmRuZBkqFbiwReogJgS1zR1n'
 
     def __init__(self, ipfs_api, state_hash=INITIAL_NODE_HASH, segmenting=None):
@@ -43,11 +43,17 @@ class KV:
                 next_parent_hash = self.INITIAL_NODE_HASH
 
             next_parent_hash = self.__set(next_parent_hash, key_parts[1:], value)
-            return self.__ipfs_api.object_patch_add_link(
-                parent_hash,
-                self.__escape_key(key_part),
-                next_parent_hash,
-            )['Hash']
+            if next_parent_hash == self.INITIAL_NODE_HASH:
+                return self.__ipfs_api.object_patch_rm_link(
+                    parent_hash,
+                    self.__escape_key(key_part),
+                )['Hash']
+            else:
+                return self.__ipfs_api.object_patch_add_link(
+                    parent_hash,
+                    self.__escape_key(key_part),
+                    next_parent_hash,
+                )['Hash']
 
     def __object_links(self, root):
         return {
@@ -82,20 +88,31 @@ class KV:
         for key_part in self.__split_key(key):
             links = self.__object_links(root)
             if key_part not in links:
-                return None
+                return b''
             root = links[key_part]
         return self.__ipfs_api.object_data(root)
 
-    def delete(self, version, key):
-        raise NotImplementedError()
+    def keys(self, start=b''):
+        for k in self.__entries(self.__state_hash, start, b''):
+            yield k
+
+    def __entries(self, root, start, prefix):
+        if prefix >= start and len(self.__ipfs_api.object_data(root)) > 0:
+            yield prefix
+        links = self.__object_links(root)
+        for k in sorted(links.keys()):
+            new_prefix = prefix + k
+            if new_prefix >= start[:len(new_prefix)]:
+                for sk in self.__entries(links[k], start, new_prefix):
+                    yield sk
 
 
 if __name__ == '__main__':
     import ipfsapi
     import sys
 
-    if len(sys.argv) < 2 or sys.argv[1] not in ['empty', 'get', 'set', 'delete']:
-        print('usage: {} empty|get|set|delete [STATE_HASH] [KEY]'.format(sys.argv[0]), file=sys.stderr)
+    if len(sys.argv) < 2 or sys.argv[1] not in ['empty', 'get', 'set']:
+        print('usage: {} empty|get|set [STATE_HASH KEY]'.format(sys.argv[0]), file=sys.stderr)
         sys.exit(1)
 
     if sys.argv[1] == 'empty':
@@ -118,10 +135,6 @@ if __name__ == '__main__':
 
     elif sys.argv[1] == 'set':
         kv.set(key, sys.stdin.buffer.read())
-        print(kv.state_hash)
-
-    elif sys.argv[1] == 'delete':
-        kv.delete(key)
         print(kv.state_hash)
 
     else:
