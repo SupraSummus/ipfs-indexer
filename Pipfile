@@ -1,0 +1,19 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+requests = "==2.13.0"
+alembic = "==0.9.1"
+"psycopg2" = "==2.7.1"
+Flask = "==0.12.1"
+Flask-Restless = "==0.17.0"
+SQLAlchemy = "==1.1.9"
+SQLAlchemy-Searchable = "==0.10.3"
+ipfsapi = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.7"
