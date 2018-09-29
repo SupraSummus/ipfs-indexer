@@ -1,10 +1,11 @@
-import io
 import urllib.parse
 
 
 class KV:
-    """Map-like object that holds mutable mapping bytestring -> bytestring. Unset values are b''."""
+    """Map-like object that holds mutable mapping bytestring -> ipfs object hash."""
     INITIAL_NODE_HASH = 'QmdfTbBqBPQ7VNxZEYEj14VmRuZBkqFbiwReogJgS1zR1n'
+    CHILD_LINK_PREFIX = 'c'
+    DATA_LINK_NAME = 'd'
 
     def __init__(self, ipfs_api, state_hash=INITIAL_NODE_HASH, segmenting=None):
         """
@@ -31,7 +32,10 @@ class KV:
 
     def __set(self, parent_hash, key_parts, value):
         if len(key_parts) == 0:
-            return self.__ipfs_api.object_patch_set_data(parent_hash, io.BytesIO(value))['Hash']
+            if value is None:
+                return self.__ipfs_api.object_patch_rm_link(parent_hash, self.DATA_LINK_NAME)['Hash']
+            else:
+                return self.__ipfs_api.object_patch_add_link(parent_hash, self.DATA_LINK_NAME, value)['Hash']
 
         else:
             key_part = key_parts[0]
@@ -46,18 +50,18 @@ class KV:
             if next_parent_hash == self.INITIAL_NODE_HASH:
                 return self.__ipfs_api.object_patch_rm_link(
                     parent_hash,
-                    self.__escape_key(key_part),
+                    key_part,
                 )['Hash']
             else:
                 return self.__ipfs_api.object_patch_add_link(
                     parent_hash,
-                    self.__escape_key(key_part),
+                    key_part,
                     next_parent_hash,
                 )['Hash']
 
     def __object_links(self, root):
         return {
-            self.__unescape_key(link['Name']): link['Hash']
+            link['Name']: link['Hash']
             for link in self.__ipfs_api.object_links(root).get('Links', [])
         }
 
@@ -73,10 +77,10 @@ class KV:
         while len(key) != 0:
             part_len = self.__segmenting(i)
             if part_len is None:
-                parts.append(key)
+                parts.append(self.CHILD_LINK_PREFIX + self.__escape_key(key))
                 break
             if part_len > 0:
-                parts.append(key[:part_len])
+                parts.append(self.CHILD_LINK_PREFIX + self.__escape_key(key[:part_len]))
                 key = key[part_len:]
                 i += 1
             else:
@@ -85,26 +89,30 @@ class KV:
 
     def get(self, key):
         root = self.__state_hash
+        links = self.__object_links(root)
         for key_part in self.__split_key(key):
-            links = self.__object_links(root)
             if key_part not in links:
-                return b''
+                return None
             root = links[key_part]
-        return self.__ipfs_api.object_data(root)
+            links = self.__object_links(root)
+        return links.get(self.DATA_LINK_NAME)
 
     def keys(self, start=b''):
-        for k in self.__entries(self.__state_hash, start, b''):
+        for k in self.__keys(self.__state_hash, start, b''):
             yield k
 
-    def __entries(self, root, start, prefix):
-        if prefix >= start and len(self.__ipfs_api.object_data(root)) > 0:
-            yield prefix
+    def __keys(self, root, start, prefix):
         links = self.__object_links(root)
+        if prefix >= start and self.DATA_LINK_NAME in links:
+            yield prefix
         for k in sorted(links.keys()):
-            new_prefix = prefix + k
+            new_prefix = prefix + self.__unescape_key(k[len(self.CHILD_LINK_PREFIX):])
             if new_prefix >= start[:len(new_prefix)]:
-                for sk in self.__entries(links[k], start, new_prefix):
+                for sk in self.__keys(links[k], start, new_prefix):
                     yield sk
+
+    def merge(self, other_root, merge_func=lambda a, b: b):
+        raise NotImplementedError()
 
 
 if __name__ == '__main__':
