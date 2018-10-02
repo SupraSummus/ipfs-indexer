@@ -1,118 +1,107 @@
 import urllib.parse
+from functools import lru_cache
+
+from .ipfs import IPFSBacked
 
 
-class KV:
-    """Map-like object that holds mutable mapping bytestring -> ipfs object hash."""
-    INITIAL_NODE_HASH = 'QmdfTbBqBPQ7VNxZEYEj14VmRuZBkqFbiwReogJgS1zR1n'
-    CHILD_LINK_PREFIX = 'c'
-    DATA_LINK_NAME = 'd'
+def KV(value_type):
+    class __KV(IPFSBacked):
+        """Map-like object that holds mutable mapping bytestring -> ipfs object."""
+        CHILD_LINK_PREFIX = 'c'
+        DATA_LINK_NAME = 'd'
 
-    def __init__(self, ipfs_api, state_hash=INITIAL_NODE_HASH, segmenting=None):
-        """
-        `state_hash` - IPFS hash of KVstore state
-        `segmenting` - iterable returning byte counts for path segment lengths
-        """
-        if segmenting is None:
-            def segmenting(_):
-                return 2
+        @classmethod
+        def zero_state_hash(cls, backend):
+            return backend.object_new()['Hash']
 
-        self.__state_hash = state_hash
-        self.__segmenting = segmenting
-        self.__ipfs_api = ipfs_api
+        def set(self, key, value):
+            assert isinstance(key, bytes)
+            assert isinstance(value, value_type)
 
-    @property
-    def state_hash(self):
-        return self.__state_hash
+            if len(key) == 0:
+                if value.is_zero:
+                    new_state_hash = self.backend.object_patch_rm_link(
+                        self.state_hash, self.DATA_LINK_NAME,
+                    )['Hash']
+                else:
+                    new_state_hash = self.backend.object_patch_add_link(
+                        self.state_hash, self.DATA_LINK_NAME, value.state_hash,
+                    )['Hash']
 
-    def set(self, key, value):
-        self.__state_hash = self.__set(
-            self.__state_hash,
-            self.__split_key(key), value,
-        )
-
-    def __set(self, parent_hash, key_parts, value):
-        if len(key_parts) == 0:
-            if value is None:
-                return self.__ipfs_api.object_patch_rm_link(parent_hash, self.DATA_LINK_NAME)['Hash']
             else:
-                return self.__ipfs_api.object_patch_add_link(parent_hash, self.DATA_LINK_NAME, value)['Hash']
+                links = self.__object_links
+                key_part = self.__escape_key(key[0:1])
 
-        else:
-            key_part = key_parts[0]
+                if key_part in links:
+                    child_hash = links[key_part]
+                else:
+                    child_hash = self.zero_state_hash(self.backend)
 
-            links = self.__object_links(parent_hash)
-            if key_part in links:
-                next_parent_hash = links[key_part]
-            else:
-                next_parent_hash = self.INITIAL_NODE_HASH
+                child_hash = self.make_self(child_hash).set(key[1:], value).state_hash
 
-            next_parent_hash = self.__set(next_parent_hash, key_parts[1:], value)
-            if next_parent_hash == self.INITIAL_NODE_HASH:
-                return self.__ipfs_api.object_patch_rm_link(
-                    parent_hash,
-                    key_part,
-                )['Hash']
-            else:
-                return self.__ipfs_api.object_patch_add_link(
-                    parent_hash,
-                    key_part,
-                    next_parent_hash,
-                )['Hash']
+                if child_hash == self.zero_state_hash(self.backend):
+                    new_state_hash = self.backend.object_patch_rm_link(
+                        self.state_hash,
+                        key_part,
+                    )['Hash']
+                else:
+                    new_state_hash = self.backend.object_patch_add_link(
+                        self.state_hash,
+                        key_part,
+                        child_hash,
+                    )['Hash']
 
-    def __object_links(self, root):
-        return {
-            link['Name']: link['Hash']
-            for link in self.__ipfs_api.object_links(root).get('Links', [])
-        }
+            return self.make_self(new_state_hash)
 
-    def __escape_key(self, key):
-        return urllib.parse.quote_from_bytes(key, safe=' ')
+        @property
+        @lru_cache(maxsize=1024)
+        def __object_links(self):
+            return {
+                link['Name']: link['Hash']
+                for link in self.backend.object_links(self.state_hash).get('Links', [])
+            }
 
-    def __unescape_key(self, key):
-        return urllib.parse.unquote_to_bytes(key)
+        @classmethod
+        def __escape_key(cls, key):
+            return cls.CHILD_LINK_PREFIX + urllib.parse.quote_from_bytes(key, safe=' ')
 
-    def __split_key(self, key):
-        parts = []
-        i = 0
-        while len(key) != 0:
-            part_len = self.__segmenting(i)
-            if part_len is None:
-                parts.append(self.CHILD_LINK_PREFIX + self.__escape_key(key))
-                break
-            if part_len > 0:
-                parts.append(self.CHILD_LINK_PREFIX + self.__escape_key(key[:part_len]))
-                key = key[part_len:]
-                i += 1
-            else:
-                assert False, "key segmenting function must return positive int or None"
-        return parts
+        @classmethod
+        def __unescape_key(cls, key):
+            assert key.startswith(cls.CHILD_LINK_PREFIX)
+            return urllib.parse.unquote_to_bytes(key[len(cls.CHILD_LINK_PREFIX):])
 
-    def get(self, key):
-        root = self.__state_hash
-        links = self.__object_links(root)
-        for key_part in self.__split_key(key):
-            if key_part not in links:
+        def get(self, key):
+            links = self.__object_links
+            if len(key) == 0:
+                return self.make(
+                    value_type,
+                    links.get(self.DATA_LINK_NAME),
+                )
+            elif self.__escape_key(key[0:1]) not in links:
                 return None
-            root = links[key_part]
-            links = self.__object_links(root)
-        return links.get(self.DATA_LINK_NAME)
+            else:
+                return self.make_self(
+                    links[self.__escape_key(key[0:1])],
+                ).get(key[1:])
 
-    def keys(self, start=b''):
-        for k in self.__keys(self.__state_hash, start, b''):
-            yield k
+        def keys(self, start=b''):
+            links = self.__object_links
+            if b'' >= start and self.DATA_LINK_NAME in links:
+                yield b''
+            for k in sorted(links.keys()):
+                if not k.startswith(self.CHILD_LINK_PREFIX):
+                    continue
+                prefix = self.__unescape_key(k)
+                if prefix >= start[:len(prefix)]:
+                    for sk in self.make_self(
+                        links[k],
+                    ).keys(start[len(prefix):]):
+                        yield prefix + sk
 
-    def __keys(self, root, start, prefix):
-        links = self.__object_links(root)
-        if prefix >= start and self.DATA_LINK_NAME in links:
-            yield prefix
-        for k in sorted(links.keys()):
-            new_prefix = prefix + self.__unescape_key(k[len(self.CHILD_LINK_PREFIX):])
-            if new_prefix >= start[:len(new_prefix)]:
-                for sk in self.__keys(links[k], start, new_prefix):
-                    yield sk
+    return __KV
 
-    def merge(self, other_root, merge_func=lambda a, b: b):
-        raise NotImplementedError()
+
+### Following code is outdated and i probably shuld nuke it but..
 
 
 if __name__ == '__main__':
