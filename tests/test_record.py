@@ -23,7 +23,7 @@ class RecordTestCase(TestCase):
     def test_set_nonexistent_field(self):
         with self.assertRaises(Exception):
             Record({})(_client).set('aaa', BYTES_A)
-        
+
     def test_set_get(self):
         self.assertEqual(
             Record({'aaa': Bytes})(_client).set('aaa', BYTES_A).get('aaa'),

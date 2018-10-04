@@ -1,14 +1,21 @@
 import urllib.parse
 from functools import lru_cache
+import logging
 
 from .ipfs import IPFSBacked
 
 
+logger = logging.getLogger(__name__)
+
+
 def KV(value_type):
     class __KV(IPFSBacked):
-        """Map-like object that holds mutable mapping bytestring -> ipfs object."""
-        CHILD_LINK_PREFIX = 'c'
-        DATA_LINK_NAME = 'd'
+        """Map object that holds mapping bytestring -> ipfs object.
+        Implemented as radix tree... OMG! It's a trie!
+        """
+        __CHILD_LINK_PREFIX = 'c'
+        __LEAF_LINK_PREFIX = 'd'
+        __MAX_KEY_LENGTH = 64  # TODO this is currently ignored
 
         @classmethod
         def zero_state_hash(cls, backend):
@@ -18,123 +25,187 @@ def KV(value_type):
             assert isinstance(key, bytes)
             assert isinstance(value, value_type)
 
-            if len(key) == 0:
+            # find prefix existing already in the tree
+            common_prefix_length, child_key, is_leaf, child_hash = self.__find_common_prefix(key)
+
+            # (no common prefix found) or (there is leaf with exact same key) - insert key as a leaf
+            if (
+                (common_prefix_length == 0) or
+                (is_leaf and child_key == key)
+            ):
                 if value.is_zero:
-                    new_state_hash = self.backend.object_patch_rm_link(
-                        self.state_hash, self.DATA_LINK_NAME,
-                    )['Hash']
+                    return self.__remove_link(True, key).__squashed
                 else:
-                    new_state_hash = self.backend.object_patch_add_link(
-                        self.state_hash, self.DATA_LINK_NAME, value.state_hash,
-                    )['Hash']
+                    return self.__set_link(True, key, value.state_hash)
+
+            elif is_leaf:
+                if value.is_zero:
+                    return self
+                else:
+                    return self.__remove_link(True, child_key).__set_link(
+                        False,
+                        key[:common_prefix_length],
+                        self.make_self().__set_link(
+                            True,
+                            child_key[common_prefix_length:],
+                            child_hash,
+                        ).__set_link(
+                            True,
+                            key[common_prefix_length:],
+                            value.state_hash,
+                        ).state_hash,
+                    )
 
             else:
-                links = self.__object_links
-                key_part = self.__escape_key(key[0:1])
-
-                if key_part in links:
-                    child_hash = links[key_part]
-                else:
-                    child_hash = self.zero_state_hash(self.backend)
-
-                child_hash = self.make_self(child_hash).set(key[1:], value).state_hash
-
-                if child_hash == self.zero_state_hash(self.backend):
-                    new_state_hash = self.backend.object_patch_rm_link(
-                        self.state_hash,
-                        key_part,
-                    )['Hash']
-                else:
-                    new_state_hash = self.backend.object_patch_add_link(
-                        self.state_hash,
-                        key_part,
+                if common_prefix_length < len(child_key):
+                    # part of the key is shared - create a new subtree and add old values and new one to it
+                    child = self.make_self().__set_link(
+                        False,
+                        child_key[common_prefix_length:],
                         child_hash,
-                    )['Hash']
+                    )
 
-            return self.make_self(new_state_hash)
+                else:  # common_prefix_length == len(child_key)
+                    # just delegate adding to subtree
+                    child = self.make_self(child_hash)
+
+                updated_child = child.set(key[common_prefix_length:], value)
+                if updated_child.is_zero:
+                    return self.__remove_link(False, child_key).__squashed
+                elif child == updated_child:
+                    return self
+                else:
+                    new = self
+                    if child_key != child_key[:common_prefix_length]:
+                        new = self.__remove_link(False, child_key)
+                    return new.__set_link(
+                        False,
+                        child_key[:common_prefix_length],
+                        updated_child.state_hash,
+                    ).__squashed
+
+        def get(self, key):
+            assert isinstance(key, bytes)
+            entries = list(self.entries(gte=key, lt=key + b'\0'))
+            if len(entries) == 0:
+                return self.make(value_type)
+            else:
+                return entries[0][1]
+
+        def entries(self, gte=b'', lt=None, reverse=False, key_length_limit=None):
+            for key, is_leaf, state_hash in sorted(self.__links, reverse=reverse):
+                if is_leaf:
+                    if (
+                        key >= gte and
+                        (lt is None or key < lt) and
+                        (key_length_limit is None or len(key) <= key_length_limit)
+                    ):
+                        yield key, self.make(value_type, state_hash)
+
+                else:
+                    if (
+                        key >= gte[:len(key)] and
+                        (lt is None or key < lt) and
+                        (key_length_limit is None or len(key) <= key_length_limit)
+                    ):
+                        for k, v in self.make_self(state_hash).entries(
+                            gte[len(key):],
+                            None if lt is None else lt[len(key):],
+                            reverse,
+                            None if key_length_limit is None else key_length_limit - len(key),
+                        ):
+                            yield key + k, v
+
+        @property
+        def dump(self):
+            d = {}
+            for key, is_leaf, state_hash in self.__links:
+                if is_leaf:
+                    d[key] = state_hash
+                else:
+                    d[key] = self.make_self(state_hash).dump
+            return d
+
+        def __set_link(self, is_leaf, key, state_hash):
+            return self.make_self(self.backend.object_patch_add_link(
+                self.state_hash,
+                self.__link_name(is_leaf, key),
+                state_hash,
+            )['Hash'])
+
+        def __remove_link(self, is_leaf, key):
+            return self.make_self(self.backend.object_patch_rm_link(
+                self.state_hash,
+                self.__link_name(is_leaf, key),
+            )['Hash'])
+
+        def __link_name(self, is_leaf, key):
+            return {
+                True: self.__LEAF_LINK_PREFIX,
+                False: self.__CHILD_LINK_PREFIX,
+            }[is_leaf] + self.__escape_key(key),
 
         @property
         @lru_cache(maxsize=1024)
-        def __object_links(self):
-            return {
-                link['Name']: link['Hash']
-                for link in self.backend.object_links(self.state_hash).get('Links', [])
-            }
-
-        @classmethod
-        def __escape_key(cls, key):
-            return cls.CHILD_LINK_PREFIX + urllib.parse.quote_from_bytes(key, safe=' ')
-
-        @classmethod
-        def __unescape_key(cls, key):
-            assert key.startswith(cls.CHILD_LINK_PREFIX)
-            return urllib.parse.unquote_to_bytes(key[len(cls.CHILD_LINK_PREFIX):])
-
-        def get(self, key):
-            links = self.__object_links
-            if len(key) == 0:
-                return self.make(
-                    value_type,
-                    links.get(self.DATA_LINK_NAME),
-                )
-            elif self.__escape_key(key[0:1]) not in links:
-                return None
-            else:
-                return self.make_self(
-                    links[self.__escape_key(key[0:1])],
-                ).get(key[1:])
-
-        def keys(self, start=b''):
-            links = self.__object_links
-            if b'' >= start and self.DATA_LINK_NAME in links:
-                yield b''
-            for k in sorted(links.keys()):
-                if not k.startswith(self.CHILD_LINK_PREFIX):
+        def __links(self):
+            links = []
+            for link in self.backend.object_links(self.state_hash).get('Links', []):
+                name = link['Name']
+                if name.startswith(self.__LEAF_LINK_PREFIX):
+                    is_leaf = True
+                    name = name[len(self.__LEAF_LINK_PREFIX):]
+                elif name.startswith(self.__CHILD_LINK_PREFIX):
+                    is_leaf = False
+                    name = name[len(self.__CHILD_LINK_PREFIX):]
+                else:
+                    logger.warning("KV %s: couldnt determine type for link '%s'", self.state_hash, name)
                     continue
-                prefix = self.__unescape_key(k)
-                if prefix >= start[:len(prefix)]:
-                    for sk in self.make_self(
-                        links[k],
-                    ).keys(start[len(prefix):]):
-                        yield prefix + sk
+                links.append((self.__unescape_key(name), is_leaf, link['Hash']))
+            return links
+
+        @staticmethod
+        def __escape_key(key):
+            return urllib.parse.quote_from_bytes(key, safe=' ')
+
+        @staticmethod
+        def __unescape_key(key):
+            return urllib.parse.unquote_to_bytes(key)
+
+        def __find_common_prefix(self, key):
+            for child_key, is_leaf, child_hash in self.__links:
+                # they are the same
+                if child_key == key:
+                    return len(key), key, is_leaf, child_hash
+
+                # find common prefix length
+                max_common_prefix_length = min(len(child_key), len(key))
+                common_prefix_length = 0
+                while (
+                    common_prefix_length < max_common_prefix_length and
+                    child_key[common_prefix_length] == key[common_prefix_length]
+                ):
+                    common_prefix_length += 1
+
+                # if there's even smallest common prefix then we cant do better
+                # (because we are searching keys of radix tree)
+                if common_prefix_length > 0:
+                    return common_prefix_length, child_key, is_leaf, child_hash
+
+            return 0, None, None, None
+
+        @property
+        def __squashed(self):
+            """Squash single layer of the tree if possible.
+            (It is possible when there is only one child link.)
+            """
+            if len(self.__links) == 1 and not self.__links[0][1]:  # single child link
+                key_prefix = self.__links[0][0]
+                child_hash = self.__links[0][2]
+                new = self.make_self()
+                for key, is_leaf, state_hash in self.make_self(child_hash).__links:
+                    new = new.__set_link(is_leaf, key_prefix + key, state_hash)
+                return new
+            else:
+                return self
 
     return __KV
-
-
-### Following code is outdated and i probably shuld nuke it but..
-
-
-if __name__ == '__main__':
-    import ipfsapi
-    import sys
-
-    if len(sys.argv) < 2 or sys.argv[1] not in ['empty', 'get', 'set']:
-        print('usage: {} empty|get|set [STATE_HASH KEY]'.format(sys.argv[0]), file=sys.stderr)
-        sys.exit(1)
-
-    if sys.argv[1] == 'empty':
-        kv = KV(
-            ipfs_api=ipfsapi.Client(),
-        )
-        print(kv.state_hash)
-        sys.exit(0)
-
-    kv = KV(
-        state_hash=sys.argv[2],
-        ipfs_api=ipfsapi.Client(),
-    )
-    key = sys.argv[3].encode('utf8')
-
-    if sys.argv[1] == 'get':
-        val = kv.get(key)
-        if val is not None:
-            sys.stdout.buffer.write(val)
-
-    elif sys.argv[1] == 'set':
-        kv.set(key, sys.stdin.buffer.read())
-        print(kv.state_hash)
-
-    else:
-        assert False
-
-    sys.exit(0)
