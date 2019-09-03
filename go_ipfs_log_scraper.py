@@ -2,8 +2,8 @@ import requests
 import json
 from functools import lru_cache
 
-from models import Name, Object
-from db_connection import session
+#from models import Name, Object
+#from db_connection import session
 
 LOG_URL = 'http://localhost:5001/api/v0/log/tail'
 
@@ -78,10 +78,11 @@ handle_systems({
 }),
 """
 
-handler = many([
-    key_if_present('peerID', store_name),
-    key_if_present('peer', store_name),
-])
+if __name__ == '__main__':
+    handler = many([
+        key_if_present('peerID', store_name),
+        key_if_present('peer', store_name),
+    ])
 
-for line in requests.get(LOG_URL, stream=True).iter_lines():
-    handler(json.loads(line))
+    for line in requests.get(LOG_URL, stream=True).iter_lines():
+        handler(json.loads(line))
