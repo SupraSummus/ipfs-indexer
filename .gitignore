@@ -1,5 +1,3 @@
 *.pyc
 *.egg-info/
-venv/
-settings.py
 .eggs/

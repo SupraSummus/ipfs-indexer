@@ -1,7 +1,0 @@
-requests==2.13.0
-Flask==0.12.1
-Flask-Restless==0.17.0
-SQLAlchemy==1.1.9
-alembic==0.9.1
-SQLAlchemy-Searchable==0.10.3
-psycopg2==2.7.1

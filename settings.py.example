@@ -1,9 +1,0 @@
-DB = 'postgresql://ipfs_indexer@localhost/ipfs_index'
-
-IPFS_API = 'http://localhost:5001/api/v0/'
-IPFS_CAT_API_URL = IPFS_API + 'cat'
-IPFS_LINKS_API_URL = IPFS_API + 'object/links'
-
-FLASK_DEBUG = True
-FLASK_HOST = '127.0.0.1'
-FLASK_PORT = 5000
