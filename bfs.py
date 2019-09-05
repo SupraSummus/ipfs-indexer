@@ -41,12 +41,13 @@ def process_vertice(v):
             # reserve this vertice for this worker
             visited.add(v)
             sys.stdout.write(f'{v}\n')
+            sys.stdout.flush()
 
     logger.debug('start %s', v)
 
     r = subprocess.run([
         'bash', '-c',
-        f'ipfs dht query -- {v} | head -n128',
+        f'ipfs dht query -- {v} | head -n64',
     ], capture_output=True, check=True)
 
     if r.returncode != 0:
@@ -71,6 +72,10 @@ def check_exception(f):
 
 def queue_vertice(v):
     assert(isinstance(v, str))
+
+    with visited_lock:
+        if v in visited:
+            return
 
     logger.debug('queuing %s', v)
 
